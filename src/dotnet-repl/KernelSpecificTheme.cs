@@ -1,5 +1,7 @@
-using RadLine;
+using PrettyPrompt;
+using PrettyPrompt.Highlighting;
 using Spectre.Console;
+using System.Threading.Tasks;
 
 namespace dotnet_repl;
 
@@ -24,7 +26,7 @@ public abstract class KernelSpecificTheme : Theme
 
     public virtual string KernelDisplayName => PromptText;
 
-    public virtual ILineEditorPrompt Prompt => new DelegatingPrompt(
+    public virtual IPrompt Prompt => new DelegatingPrompt(
         $"[{AnnouncementTextStyle.Foreground}]{PromptText} [/][{Decoration.Bold} {AccentStyle.Foreground} {Decoration.SlowBlink}]>[/]",
         $"[{Decoration.Bold} {AccentStyle.Foreground} {Decoration.SlowBlink}] ...[/]");
 
@@ -100,17 +102,29 @@ public class SqlTheme : KernelSpecificTheme
     public override string PromptText => "SQL";
 }
 
-internal class DelegatingPrompt : ILineEditorPrompt
+internal class DelegatingPrompt : IPrompt
 {
     public DelegatingPrompt(string prompt, string? more = null)
     {
-        InnerPrompt = new LineEditorPrompt(prompt, more);
+        InnerPrompt = new Prompt(
+            //callbacks: new ReplPromptCallbacks(this),
+            configuration: new PromptConfiguration(
+                prompt: new FormattedString($"{prompt}> ", new FormatSpan(0, 1, AnsiColor.Red), new FormatSpan(1, 1, AnsiColor.Yellow), new FormatSpan(2, 1, AnsiColor.Green)),
+                completionItemDescriptionPaneBackground: AnsiColor.Rgb(30, 30, 30),
+                selectedCompletionItemBackground: AnsiColor.Rgb(30, 30, 30),
+                selectedTextBackground: AnsiColor.Rgb(20, 61, 102))
+            );
     }
 
-    public (Markup Markup, int Margin) GetPrompt(ILineEditorState state, int line)
+    //public (Markup Markup, int Margin) GetPrompt(ILineEditorState state, int line)
+    //{
+    //    return InnerPrompt.GetPrompt(state, line);
+    //}
+
+    public Task<PromptResult> ReadLineAsync()
     {
-        return InnerPrompt.GetPrompt(state, line);
+        return InnerPrompt.ReadLineAsync();
     }
 
-    public ILineEditorPrompt InnerPrompt { get; set; }
+    public Prompt InnerPrompt { get; set; }
 }

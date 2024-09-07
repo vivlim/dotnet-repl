@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using RadLine;
 
 namespace dotnet_repl.LineEditorCommands;
 
-public sealed class CompletionCommand : LineEditorCommand
+/*
+public sealed class CompletionCommand : LineEditorCommand // Tab complete
 {
     private const string QUERY_STATE = "AUTOCOMPLETE_QUERY";
     private const string RESULT_STATE = "AUTOCOMPLETE_RESULTS";
@@ -118,3 +118,4 @@ public sealed class CompletionCommand : LineEditorCommand
         return length;
     }
 }
+*/

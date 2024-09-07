@@ -1,7 +1,6 @@
-﻿using RadLine;
+﻿namespace dotnet_repl.LineEditorCommands;
 
-namespace dotnet_repl.LineEditorCommands;
-
+/*
 public class Clear : LineEditorCommand
 {
     public override void Execute(LineEditorContext context)
@@ -10,3 +9,4 @@ public class Clear : LineEditorCommand
         context.Buffer.Move(0);
     }
 }
+*/

@@ -1,4 +1,3 @@
-using RadLine;
 using Spectre.Console;
 using System.Collections.Generic;
 
@@ -6,6 +5,7 @@ namespace dotnet_repl;
 
 using WordsToHighlight = IEnumerable<(Style style, string[] words)>;
 
+/*
 internal static class ReplWordHighlighter
 {
     private static void AddWords(this WordHighlighter highlighter, WordsToHighlight wordsToHighlight)
@@ -274,3 +274,4 @@ internal static class ReplWordHighlighter
             })
     };
 }
+*/

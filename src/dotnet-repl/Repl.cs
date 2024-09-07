@@ -13,7 +13,10 @@ using Microsoft.DotNet.Interactive.Documents;
 using Microsoft.DotNet.Interactive.Events;
 using Microsoft.DotNet.Interactive.Formatting;
 using Pocket;
-using RadLine;
+using PrettyPrompt;
+using PrettyPrompt.Consoles;
+using PrettyPrompt.Documents;
+using PrettyPrompt.Highlighting;
 using Spectre.Console;
 using static dotnet_repl.AnsiConsoleExtensions;
 using Formatter = Microsoft.DotNet.Interactive.Formatting.Formatter;
@@ -30,22 +33,25 @@ public class Repl : IDisposable
 
     private readonly Subject<Unit> _readyForInput = new();
 
-    private LineEditor GetLineEditorLanguageLocal(string kernelName)
+    private Prompt GetLineEditorLanguageLocal(string kernelName)
     {
-        var lineEditor = new LineEditor(AnsiConsole, InputSource, LineEditorProvider)
-        {
-            MultiLine = true,
-            Prompt = Theme.Prompt,
-            Highlighter = ReplWordHighlighter.Create(kernelName)
-        };
-        return lineEditor;
+        var prompt = new Prompt(
+            callbacks: new ReplPromptCallbacks(this),
+            configuration: new PromptConfiguration(
+                prompt: new FormattedString($"{kernelName}> ", new FormatSpan(0, 1, AnsiColor.Red), new FormatSpan(1, 1, AnsiColor.Yellow), new FormatSpan(2, 1, AnsiColor.Green)),
+                completionItemDescriptionPaneBackground: AnsiColor.Rgb(30, 30, 30),
+                selectedCompletionItemBackground: AnsiColor.Rgb(30, 30, 30),
+                selectedTextBackground: AnsiColor.Rgb(20, 61, 102))
+            );
+
+        return prompt;
     }
 
     public Repl(
         CompositeKernel kernel,
         Action quit,
         IAnsiConsole ansiConsole,
-        IInputSource? inputSource = null)
+        SystemConsole? inputSource = null)
     {
         _kernel = kernel;
         QuitAction = quit;
@@ -85,9 +91,9 @@ public class Repl : IDisposable
 
     public IAnsiConsole AnsiConsole { get; }
 
-    public IInputSource? InputSource { get; }
+    public SystemConsole? InputSource { get; }
 
-    public LineEditor? LineEditor { get; private set; }
+    public Prompt? LineEditor { get; private set; }
 
     internal Action QuitAction { get; }
 
@@ -124,14 +130,9 @@ public class Repl : IDisposable
                 {
                     SetTheme();
                     _readyForInput.OnNext(Unit.Default);
-                    input = await LineEditor!.ReadLine(_disposalTokenSource.Token);
-                }
-            }
-            else
-            {
-                if (!exitAfterRun)
-                {
-                    LineEditor!.History.Add(input);
+                    var response = await LineEditor!.ReadLineAsync();
+                    // viv todo: should more of the response be kept?
+                    input = response.Text;
                 }
             }
 
@@ -142,7 +143,7 @@ public class Repl : IDisposable
             }
             else
             {
-                var result = await RunKernelCommand(new SubmitCode(input));
+                var result = await RunKernelCommand(new SubmitCode(input)); // viv: enter is pressed
 
                 if (result.Events.Last() is CommandFailed)
                 {
@@ -161,15 +162,15 @@ public class Repl : IDisposable
 
     private void SetTheme()
     {
-        if (KernelSpecificTheme.GetTheme(_kernel.DefaultKernelName) is { } theme)
-        {
-            Theme = theme;
+        //if (KernelSpecificTheme.GetTheme(_kernel.DefaultKernelName) is { } theme)
+        //{
+        //    Theme = theme;
 
-            if (LineEditor?.Prompt is DelegatingPrompt d)
-            {
-                d.InnerPrompt = theme.Prompt;
-            }
-        }
+        //    if (LineEditor?.Prompt is DelegatingPrompt d)
+        //    {
+        //        d.InnerPrompt = theme.Prompt;
+        //    }
+        //}
     }
 
     private async Task<KernelCommandResult> RunKernelCommand(KernelCommand command)
@@ -287,5 +288,44 @@ public class Repl : IDisposable
         Formatter.ResetToDefault();
         Formatter.DefaultMimeType = PlainTextFormatter.MimeType;
         new DefaultSpectreFormatterSet().Register();
+    }
+
+    private class ReplPromptCallbacks(Repl repl) : PromptCallbacks
+    {
+        protected override async Task<IReadOnlyList<PrettyPrompt.Completion.CompletionItem>> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken cancellationToken)
+        {
+            if (repl.LineEditorProvider is not IServiceProvider services)
+            {
+                return Array.Empty<PrettyPrompt.Completion.CompletionItem>();
+            }
+            if (services.GetService(typeof(KernelCompletion)) is not KernelCompletion kernelCompletion)
+            {
+                return Array.Empty<PrettyPrompt.Completion.CompletionItem>();
+            }
+
+            var kernelItems = await kernelCompletion.GetCompletionItemsAsync(text, caret, spanToBeReplaced, cancellationToken);
+            var prettyPromptItems = ConvertCompletionItem(kernelItems).ToArray();
+            return prettyPromptItems;
+        }
+
+        private IEnumerable<PrettyPrompt.Completion.CompletionItem> ConvertCompletionItem(IEnumerable<CompletionItem> items)
+        {
+            foreach (var item in items)
+            {
+                var color = item.Kind switch
+                {
+                    _ => AnsiColor.White,
+                };
+                var displayText = new FormattedString(item.DisplayText, new FormatSpan(0, item.DisplayText.Length, color));
+                var description = new FormattedString(item.Documentation);
+                yield return new PrettyPrompt.Completion.CompletionItem(
+                    replacementText: item.InsertText,
+                    displayText: item.DisplayText,
+                    filterText: item.FilterText ?? item.InsertText,
+                    getExtendedDescription: _ => Task.FromResult(description));
+            }
+
+        }
+
     }
 }

@@ -6,8 +6,10 @@ using Microsoft.DotNet.Interactive;
 using Microsoft.DotNet.Interactive.Commands;
 using Microsoft.DotNet.Interactive.Events;
 using Pocket;
-using RadLine;
 using static Pocket.Logger<dotnet_repl.KernelCompletion>;
+using PrettyPrompt.Documents;
+using System.Threading;
+using System;
 
 namespace dotnet_repl;
 
@@ -20,16 +22,11 @@ public class KernelCompletion
         _kernel = kernel;
     }
 
-    public IEnumerable<string> GetCompletions(LineBuffer buffer)
-    {
-        return GetCompletionsAsync(buffer).Result;
-    }
-
-    private async Task<IEnumerable<string>> GetCompletionsAsync(LineBuffer buffer)
+    public async ValueTask<IReadOnlyList<CompletionItem>> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken cancellationToken)
     {
         var command = new RequestCompletions(
-            buffer.Content,
-            new LinePosition(0, buffer.CursorPosition));
+            text,
+            new LinePosition(0, caret));
 
         var result = await _kernel.SendAsync(command);
 
@@ -40,25 +37,57 @@ public class KernelCompletion
 
         if (completionsProduced is null)
         {
-            return Enumerable.Empty<string>();
+            return Array.Empty<CompletionItem>();
         }
 
-        var code = buffer.Content[..buffer.CursorPosition];
+        return completionsProduced.Completions.ToArray();
 
-        var matches = completionsProduced
-                      .Completions
-                      .Select(c => c.InsertText)
-                      .OrderBy(c => c)
-                      .Where(text => text is not null &&
-                                     text.StartsWith(code.Split('.', ' ').LastOrDefault() ?? code))
-                      .ToArray();
 
-        Log.Info(
-            "buffer: {buffer}, code: {code}, matches: {matches}",
-            buffer.Content,
-            code,
-            string.Join(",", matches));
+        /*
+        var matches = FilterItems(text, spanToBeReplaced, completionsProduced);
 
         return matches;
+        */
+    }
+
+    private unsafe CompletionItem[] FilterItems(string text, TextSpan spanToBeReplaced, CompletionsProduced completionsProduced)
+    {
+        if (spanToBeReplaced.Length == 0)
+        {
+            return completionsProduced.Completions.ToArray();
+        }
+
+        // prefix matching time
+        ReadOnlySpan<char> prefix = text.AsSpan(spanToBeReplaced.Start, spanToBeReplaced.Length);
+
+        // if the span to be replaced has multiple parts, just use the last one for filtering
+        int lastPartIndex = MemoryExtensions.LastIndexOf(prefix, '.');
+        if (lastPartIndex >= 0)
+        {
+            prefix = prefix.Slice(lastPartIndex + 1);
+        }
+
+        fixed (char* ptr = prefix)
+        {// sneak the pointer into the lambda. i promise it won't be used outside the lifetime of this method :)
+            var prefixPtr = ptr; 
+            var prefixLen = prefix.Length;
+            CompletionItem[] matches = completionsProduced
+                          .Completions
+                          .OrderBy(c => c.InsertText)
+                          .Where(c =>
+                          {
+                              // recreate the span
+                              ReadOnlySpan<char> lastPart = new(prefixPtr, prefixLen);
+                              return c.InsertText is not null && c.InsertText.AsSpan().StartsWith(lastPart);
+                          })
+                          .ToArray();
+
+            Log.Info(
+                "buffer: {buffer}, code: {code}, matches: {matches}",
+                text,
+                prefix.ToString(),
+                string.Join(",", matches.Select(m => m.InsertText)));
+            return matches;
+        }
     }
 }

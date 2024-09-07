@@ -1,9 +1,9 @@
 ﻿using System;
-using RadLine;
 using Spectre.Console;
 
 namespace dotnet_repl.LineEditorCommands;
 
+/*
 public class Quit : LineEditorCommand
 {
     private readonly Action _triggerQuit;
@@ -21,3 +21,4 @@ public class Quit : LineEditorCommand
         _triggerQuit();
     }
 }
+*/
