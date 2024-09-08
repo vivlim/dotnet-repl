@@ -326,12 +326,13 @@ public class Repl : IDisposable
                         .Select(c => ConvertCompletionItem(cp, c, text, spanToBeReplaced,
                         getDescription: async cancel =>
                         {
-                            var textWithCompletion = text.Substring(0, spanToBeReplaced.Start) + c.InsertText;
+                            var candidate = c.InsertText ?? c.DisplayText;
+                            var textWithCompletion = text.Substring(0, spanToBeReplaced.Start) + candidate;
                             LinePosition position = cp.LinePositionSpan?.Start ?? TextUtils.GetLineNumberForCharIndex(textWithCompletion, spanToBeReplaced.Start);
                             try
                             {
-                                var hoverText = await kernelCompletion.GetHoverTextAsync(textWithCompletion, position, currentKernelName, cancellationToken);
-                                return hoverText?.Content.FirstOrDefault()?.Value ?? "null";
+                                var hoverText = await kernelCompletion.GetHoverTextAsync(textWithCompletion, c, position, currentKernelName, cancellationToken);
+                                return hoverText?.Value ?? "null";
                             }
                             catch (Exception ex)
                             {

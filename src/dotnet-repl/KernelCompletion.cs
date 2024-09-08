@@ -10,6 +10,9 @@ using static Pocket.Logger<dotnet_repl.KernelCompletion>;
 using PrettyPrompt.Documents;
 using System.Threading;
 using System;
+using System.Text;
+using Markdig.Helpers;
+using System.IO;
 
 namespace dotnet_repl;
 
@@ -62,18 +65,130 @@ public class KernelCompletion
         return signatureHelpProduced;
     }
 
-    public async Task<HoverTextProduced?> GetHoverTextAsync(string text, LinePosition linePosition, string? kernel, CancellationToken cancellationToken)
+    public async Task<FormattedValue?> GetHoverTextAsync(string text, CompletionItem completionItem, LinePosition linePosition, string? kernel, CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(1));
+
+        if (kernel is "powershell" or "pwsh")
+        {
+            if (completionItem.Documentation is string documentationString)
+            {
+                // If the completion item is a file, the documentation string may be an absolute path.
+                try
+                {
+                    if (Path.IsPathFullyQualified(documentationString))
+                    {
+                        if (Directory.Exists(documentationString))
+                        {
+                            var entries = Directory.EnumerateFileSystemEntries(documentationString);
+                            var files = entries.Take(20).Select(fp => {
+                                if (Directory.Exists(fp))
+                                {
+                                    return $"[{Path.GetFileName(fp)}]";
+                                }
+                                return Path.GetFileName(fp);
+                            }).ToList();
+                            if (files.Count == 20)
+                            { 
+                                if (entries.TryGetNonEnumeratedCount(out int remainingCount))
+                                {
+                                    files.Add($"... {remainingCount} more");
+                                }
+                                else
+                                {
+                                    files.Add($"... more");
+                                }
+                            }
+
+                            var dirList = "Directory\n" + string.Join(", ", files);
+                            return new FormattedValue("text/plain", dirList);
+                        }
+                        else if (File.Exists(documentationString))
+                        {
+                            var info = new FileInfo(documentationString);
+                            return new FormattedValue("text/plain", $"File\ncreated: {info.CreationTime}, last write: {info.LastWriteTime}");
+                        }
+
+                    }
+                }
+                catch { }
+            }
+
+
+            // try to get the cmdlet name
+            var cmdletName = TextUtils.ExtractWordAt(text, linePosition, [' ', '.', ';', '\n', '(', ')', '{', '}', '[', ']', ':']);
+            if (string.IsNullOrEmpty(cmdletName))
+            {
+                return null;
+            }
+            foreach (var c in cmdletName)
+            {
+                if (!c.IsAlphaNumeric() && c != '-')
+                {
+                    return null;
+                }
+            }
+            // todo sanitize cmdlet name
+
+            var getHelpOutput = await this.RunCodeAndCollectStdout($"Get-Help {cmdletName}", kernel, timeoutCts.Token);
+
+            return new FormattedValue("text/plain", getHelpOutput);
+        }
+
         var command = new RequestHoverText(text, linePosition, kernel);
 
-        var result = await _kernel.SendAsync(command);
+        var result = await _kernel.SendAsync(command, timeoutCts.Token);
 
         var hoverTextProduced = result
                                   .Events
                                   .OfType<HoverTextProduced>()
                                   .FirstOrDefault();
-        return hoverTextProduced;
+        return hoverTextProduced?.Content.FirstOrDefault();
     }
+
+    public async Task<string> RunCodeAndCollectStdout(string cmdText, string? kernel, CancellationToken cancellationToken)
+    {
+        var events = _kernel.KernelEvents.Replay();
+        using var _ = events.Connect();
+        var tcs = new TaskCompletionSource();
+        StringBuilder stdOut = new();
+
+        var command = new SubmitCode(cmdText, kernel);
+        var sendTask = _kernel.SendAsync(command);
+
+        await Task.Run(async () =>
+        {
+            using var _ = events.Subscribe(@event =>
+            {
+                switch (@event)
+                {
+                    case StandardOutputValueProduced standardOutputValueProduced:
+                        stdOut.Append(standardOutputValueProduced.PlainTextValue());
+
+                        break;
+
+                    // command completion events
+
+                    case CommandFailed failed when failed.Command == command:
+                        tcs.SetResult();
+
+                        break;
+
+                    case CommandSucceeded succeeded when succeeded.Command == command:
+                        tcs.SetResult();
+
+                        break;
+                }
+            });
+            await tcs.Task;
+        });
+
+        var result = await sendTask;
+
+        return stdOut.ToString();
+    }
+
 
     // totally unnecessary. we don't filter here
     private unsafe CompletionItem[] FilterItems(string text, TextSpan spanToBeReplaced, CompletionsProduced completionsProduced)
@@ -95,7 +210,7 @@ public class KernelCompletion
 
         fixed (char* ptr = prefix)
         {// sneak the pointer into the lambda. i promise it won't be used outside the lifetime of this method :)
-            var prefixPtr = ptr; 
+            var prefixPtr = ptr;
             var prefixLen = prefix.Length;
             CompletionItem[] matches = completionsProduced
                           .Completions

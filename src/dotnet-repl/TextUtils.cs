@@ -1,6 +1,7 @@
 ﻿using Microsoft.DotNet.Interactive;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -45,5 +46,34 @@ public static class TextUtils
         }
 
         return false;
+    }
+
+    public static string? ExtractWordAt(string text, LinePosition position, char[] delimiters)
+    {
+        var lineEnumerator = MemoryExtensions.EnumerateLines(text.AsSpan());
+        int lineNum = 0;
+        while (lineEnumerator.MoveNext() && lineNum < position.Line)
+        {
+            lineNum++;
+        }
+
+        var currentLine = lineEnumerator.Current;
+        var left = currentLine.Slice(0, position.Character);
+        int leftIndex = left.LastIndexOfAny(delimiters);
+
+        if (leftIndex == -1)
+        {
+            return currentLine.ToString();
+        }
+
+        if (currentLine.Length + 1 > position.Character)
+        {
+            var right = currentLine.Slice(0, position.Character);
+            int rightIndex = right.IndexOfAny(delimiters);
+            return currentLine.Slice(leftIndex, rightIndex - leftIndex).ToString();
+        }
+
+        return currentLine.Slice(leftIndex).ToString();
+
     }
 }
