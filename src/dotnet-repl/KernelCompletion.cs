@@ -22,12 +22,12 @@ public class KernelCompletion
         _kernel = kernel;
     }
 
-    public async Task<CompletionsProduced?> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken cancellationToken)
+    public async Task<CompletionsProduced?> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, string? kernelName, int inputOffset, CancellationToken cancellationToken)
     {
-        var linePosition = GetLineNumberForCharIndex(text, caret);
+        var linePosition = TextUtils.GetLineNumberForCharIndex(text, caret);
         var command = new RequestCompletions(
             text,
-            linePosition);
+            linePosition, kernelName);
 
         var result = await _kernel.SendAsync(command);
 
@@ -36,26 +36,17 @@ public class KernelCompletion
                                   .OfType<CompletionsProduced>()
                                   .FirstOrDefault();
 
-        return completionsProduced;
-    }
-
-    private LinePosition GetLineNumberForCharIndex(string text, int charPosition)
-    {
-        var lineEnumerator = MemoryExtensions.EnumerateLines(text.AsSpan());
-        int lineNum = 0;
-        while (lineEnumerator.MoveNext())
+        if (inputOffset > 0 && completionsProduced is not null && completionsProduced.LinePositionSpan.Start.Line == 0)
         {
-            var currentLine = lineEnumerator.Current;
-            if (charPosition <= currentLine.Length)
-            {
-                return new(lineNum, charPosition);
-            }
+            var spanToRemap = completionsProduced.LinePositionSpan;
+            var start = new LinePosition(0, spanToRemap.Start.Character + inputOffset);
+            var end = spanToRemap.End.Line == 0 ? new LinePosition(0, spanToRemap.End.Character + inputOffset) : spanToRemap.End;
 
-            charPosition -= currentLine.Length + 1; // add one back for newline.
-            lineNum++;
+            var offsetSpan = new LinePositionSpan(start, end);
+            return new CompletionsProduced(completionsProduced.Completions, completionsProduced.Command as RequestCompletions, offsetSpan);
         }
 
-        return new(lineNum, charPosition);
+        return completionsProduced;
     }
 
     // totally unnecessary. we don't filter here

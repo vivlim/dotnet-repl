@@ -292,8 +292,14 @@ public class Repl : IDisposable
         new DefaultSpectreFormatterSet().Register();
     }
 
-    private class ReplPromptCallbacks(Repl repl) : PromptCallbacks
+    private class ReplPromptCallbacks : PromptCallbacks
     {
+        private readonly Repl repl;
+        public ReplPromptCallbacks(Repl repl)
+        {
+            this.repl = repl;
+        }
+
         protected override async Task<IReadOnlyList<PrettyPrompt.Completion.CompletionItem>> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken cancellationToken)
         {
             if (repl.LineEditorProvider is not IServiceProvider services)
@@ -305,7 +311,9 @@ public class Repl : IDisposable
                 return Array.Empty<PrettyPrompt.Completion.CompletionItem>();
             }
 
-            var itemTasks = this.GetCompletionRequestTasksAsync(text, caret, spanToBeReplaced, kernelCompletion, cancellationToken).ToArray();
+            string currentKernelName = this.repl.DefaultKernelName;
+
+            var itemTasks = this.GetCompletionRequestTasksAsync(text, caret, spanToBeReplaced, kernelCompletion, currentKernelName, 0, cancellationToken).ToArray();
             CompletionsProduced[] items = (await Task.WhenAll(itemTasks)).Where(cp => cp is not null).Cast<CompletionsProduced>().ToArray();
 
             PrettyPrompt.Completion.CompletionItem[] prettyPromptItems =
@@ -319,15 +327,41 @@ public class Repl : IDisposable
             return prettyPromptItems;
         }
 
-        private IEnumerable<Task<CompletionsProduced?>> GetCompletionRequestTasksAsync(string text, int caret, TextSpan spanToBeReplaced, KernelCompletion kernelCompletion, CancellationToken cancellationToken)
+        private IEnumerable<Task<CompletionsProduced?>> GetCompletionRequestTasksAsync(string text, int caret, TextSpan spanToBeReplaced, KernelCompletion kernelCompletion, string kernelName, int inputOffset, CancellationToken cancellationToken)
         {
+            if (text[0] == '#')
+            {
+                var firstSpace = text.IndexOf(' ');
+                if (firstSpace > 4 && caret >= firstSpace) // 4 is kinda arbitrary but there are no kernels whose names are less than 4
+                {
+                    // They might be specifying another kernel, in which case we should return completions for that kernel instead
+                    if (text[1] == '!')
+                    {
+                        // Some kind of magic command. Assume it's the name of a kernel.
+                        var specifiedKernelName = text.Substring(2, firstSpace - 2);
+
+                        // and shift the text around.
+                        var charsDropped = firstSpace + 1;
+                        string specifiedKernelText = text.Substring(firstSpace + 1);
+                        int specifiedKernelCaret = caret - charsDropped;
+                        TextSpan specifiedKernelSpanToBeReplaced = new(spanToBeReplaced.Start - charsDropped, spanToBeReplaced.Length);
+
+                        foreach (var specifiedKernelCompletionTask in this.GetCompletionRequestTasksAsync(specifiedKernelText, specifiedKernelCaret, specifiedKernelSpanToBeReplaced, kernelCompletion, specifiedKernelName, inputOffset + charsDropped, cancellationToken))
+                        {
+                            yield return specifiedKernelCompletionTask;
+                        }
+                        // I assume there's no reason to run requests for any other kernel..
+                        yield break;
+                    }
+                }
+            }
             // Default
-            yield return kernelCompletion.GetCompletionItemsAsync(text, caret, spanToBeReplaced, cancellationToken);
+            yield return kernelCompletion.GetCompletionItemsAsync(text, caret, spanToBeReplaced, kernelName, inputOffset, cancellationToken);
 
             // If you've only typed a single #, get completions for #! too.
             if (text == "#")
             {
-                yield return kernelCompletion.GetCompletionItemsAsync("#!", caret, spanToBeReplaced, cancellationToken);
+                yield return kernelCompletion.GetCompletionItemsAsync("#!", caret, spanToBeReplaced, kernelName, inputOffset, cancellationToken);
             }
         }
 
@@ -369,6 +403,24 @@ public class Repl : IDisposable
                 getExtendedDescription: _ => Task.FromResult(formattedDescription));
         }
 
+        protected override async Task<KeyPress> TransformKeyPressAsync(string text, int caret, KeyPress keyPress, CancellationToken cancellationToken)
+        {
+            if (keyPress.ConsoleKeyInfo.Modifiers == ConsoleModifiers.None)
+            {
+                if (keyPress.ConsoleKeyInfo.Key is ConsoleKey.Tab)
+                {
+                    // If tab is pressed and we aren't at the start of the line (doing indentation) then let's show the completion window instead.
+                    bool onlyWhiteSpaceToLeft = TextUtils.CurrentLineHasOnlyWhitespaceToLeftOfPosition(text, caret);
+                    if (!onlyWhiteSpaceToLeft)
+                    {
+                        return new KeyPress(new ConsoleKeyInfo(' ', ConsoleKey.Spacebar, false, false, true));
+                    }
+                }
+            }
+
+            return await base.TransformKeyPressAsync(text, caret, keyPress, cancellationToken);
+        }
+
         protected override async Task<bool> ShouldOpenCompletionWindowAsync(string text, int caret, KeyPress keyPress, CancellationToken cancellationToken)
         {
             if (text == "#!" && caret == 2)
@@ -378,6 +430,21 @@ public class Repl : IDisposable
                     return true;
                 }
             }
+
+            //if (keyPress.ConsoleKeyInfo.Modifiers == ConsoleModifiers.None)
+            //{
+            //    if (keyPress.ConsoleKeyInfo.Key is ConsoleKey.Tab)
+            //    {
+            //        // If tab is pressed and we aren't at the start of the line (doing indentation) then let's show the completion window instead.
+            //        bool onlyWhiteSpaceToLeft = TextUtils.CurrentLineHasOnlyWhitespaceToLeftOfPosition(text, caret);
+            //        if (!onlyWhiteSpaceToLeft)
+            //        {
+            //            return true;
+            //        }
+            //    }
+            //}
+
+
             return await base.ShouldOpenCompletionWindowAsync(text, caret, keyPress, cancellationToken);
         }
     }
