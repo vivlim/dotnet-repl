@@ -1,4 +1,7 @@
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.DotNet.Interactive;
 using Microsoft.DotNet.Interactive.Browser;
@@ -68,8 +71,17 @@ public static class KernelBuilder
                 .UseValueSharing(),
             new[] { "f#", "F#" });
 
+        var powershellKernel = new PowerShellKernel();
+
+        // hack: my arm64 machine doesn't have powershell modules at the normal spot and they're x64 (arm64 pwsh is currently preview)
+        var hardcodedModulePath = @"C:\tools\PowerShell-7.4.4-win-arm64\";
+        if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 && Directory.Exists(hardcodedModulePath))
+        {
+            powershellKernel.AddModulePath(hardcodedModulePath);
+        }
+
         compositeKernel.Add(
-            new PowerShellKernel()
+            powershellKernel
                 .UseProfiles()
                 .UseValueSharing(),
             new[] { "powershell" });
