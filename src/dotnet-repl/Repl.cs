@@ -19,6 +19,7 @@ using PrettyPrompt.Documents;
 using PrettyPrompt.Highlighting;
 using Spectre.Console;
 using static dotnet_repl.AnsiConsoleExtensions;
+using static PrettyPrompt.Completion.CompletionItem;
 using Formatter = Microsoft.DotNet.Interactive.Formatting.Formatter;
 
 namespace dotnet_repl;
@@ -322,7 +323,21 @@ public class Repl : IDisposable
                 .SelectMany(
                     cp => cp.Completions
                         .AsParallel()
-                        .Select(c => ConvertCompletionItem(cp, c, text, spanToBeReplaced)))
+                        .Select(c => ConvertCompletionItem(cp, c, text, spanToBeReplaced,
+                        getDescription: async cancel =>
+                        {
+                            var textWithCompletion = text.Substring(0, spanToBeReplaced.Start) + c.InsertText;
+                            LinePosition position = cp.LinePositionSpan?.Start ?? TextUtils.GetLineNumberForCharIndex(textWithCompletion, spanToBeReplaced.Start);
+                            try
+                            {
+                                var hoverText = await kernelCompletion.GetHoverTextAsync(textWithCompletion, position, currentKernelName, cancellationToken);
+                                return hoverText?.Content.FirstOrDefault()?.Value ?? "null";
+                            }
+                            catch (Exception ex)
+                            {
+                                return $"failed: {ex}";
+                            }
+                        })))
                 .ToArray();
             return prettyPromptItems;
         }
@@ -366,7 +381,7 @@ public class Repl : IDisposable
         }
 
 
-        private PrettyPrompt.Completion.CompletionItem ConvertCompletionItem(CompletionsProduced completions, CompletionItem item, string text, TextSpan spanToBeReplaced)
+        private PrettyPrompt.Completion.CompletionItem ConvertCompletionItem(CompletionsProduced completions, CompletionItem item, string text, TextSpan spanToBeReplaced, GetExtendedDescriptionHandler? getDescription)
         {
             var color = item.Kind switch
             {
@@ -400,7 +415,7 @@ public class Repl : IDisposable
                 replacementText: replacementText,
                 displayText: formattedDisplayText,
                 filterText: filterText ?? displayText,
-                getExtendedDescription: _ => Task.FromResult(formattedDescription));
+                getExtendedDescription: getDescription);
         }
 
         protected override async Task<KeyPress> TransformKeyPressAsync(string text, int caret, KeyPress keyPress, CancellationToken cancellationToken)
@@ -447,5 +462,6 @@ public class Repl : IDisposable
 
             return await base.ShouldOpenCompletionWindowAsync(text, caret, keyPress, cancellationToken);
         }
+
     }
 }

@@ -49,6 +49,32 @@ public class KernelCompletion
         return completionsProduced;
     }
 
+    public async Task<SignatureHelpProduced?> GetSignatureHelpAsync(string text, LinePosition linePosition, string? kernel, CancellationToken cancellationToken)
+    {
+        var command = new RequestSignatureHelp(text, linePosition, kernel);
+
+        var result = await _kernel.SendAsync(command);
+
+        var signatureHelpProduced = result
+                                  .Events
+                                  .OfType<SignatureHelpProduced>()
+                                  .FirstOrDefault();
+        return signatureHelpProduced;
+    }
+
+    public async Task<HoverTextProduced?> GetHoverTextAsync(string text, LinePosition linePosition, string? kernel, CancellationToken cancellationToken)
+    {
+        var command = new RequestHoverText(text, linePosition, kernel);
+
+        var result = await _kernel.SendAsync(command);
+
+        var hoverTextProduced = result
+                                  .Events
+                                  .OfType<HoverTextProduced>()
+                                  .FirstOrDefault();
+        return hoverTextProduced;
+    }
+
     // totally unnecessary. we don't filter here
     private unsafe CompletionItem[] FilterItems(string text, TextSpan spanToBeReplaced, CompletionsProduced completionsProduced)
     {
