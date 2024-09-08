@@ -33,6 +33,8 @@ public class Repl : IDisposable
 
     private readonly Subject<Unit> _readyForInput = new();
 
+    public string? DefaultKernelName => this._kernel.DefaultKernelName;
+
     private Prompt GetLineEditorLanguageLocal(string kernelName)
     {
         var prompt = new Prompt(
@@ -303,29 +305,80 @@ public class Repl : IDisposable
                 return Array.Empty<PrettyPrompt.Completion.CompletionItem>();
             }
 
-            var kernelItems = await kernelCompletion.GetCompletionItemsAsync(text, caret, spanToBeReplaced, cancellationToken);
-            var prettyPromptItems = ConvertCompletionItem(kernelItems).ToArray();
+            var itemTasks = this.GetCompletionRequestTasksAsync(text, caret, spanToBeReplaced, kernelCompletion, cancellationToken).ToArray();
+            CompletionsProduced[] items = (await Task.WhenAll(itemTasks)).Where(cp => cp is not null).Cast<CompletionsProduced>().ToArray();
+
+            PrettyPrompt.Completion.CompletionItem[] prettyPromptItems =
+                items
+                .AsParallel()
+                .SelectMany(
+                    cp => cp.Completions
+                        .AsParallel()
+                        .Select(c => ConvertCompletionItem(cp, c, text, spanToBeReplaced)))
+                .ToArray();
             return prettyPromptItems;
         }
 
-        private IEnumerable<PrettyPrompt.Completion.CompletionItem> ConvertCompletionItem(IEnumerable<CompletionItem> items)
+        private IEnumerable<Task<CompletionsProduced?>> GetCompletionRequestTasksAsync(string text, int caret, TextSpan spanToBeReplaced, KernelCompletion kernelCompletion, CancellationToken cancellationToken)
         {
-            foreach (var item in items)
-            {
-                var color = item.Kind switch
-                {
-                    _ => AnsiColor.White,
-                };
-                var displayText = new FormattedString(item.DisplayText, new FormatSpan(0, item.DisplayText.Length, color));
-                var description = new FormattedString(item.Documentation);
-                yield return new PrettyPrompt.Completion.CompletionItem(
-                    replacementText: item.InsertText,
-                    displayText: item.DisplayText,
-                    filterText: item.FilterText ?? item.InsertText,
-                    getExtendedDescription: _ => Task.FromResult(description));
-            }
+            // Default
+            yield return kernelCompletion.GetCompletionItemsAsync(text, caret, spanToBeReplaced, cancellationToken);
 
+            // If you've only typed a single #, get completions for #! too.
+            if (text == "#")
+            {
+                yield return kernelCompletion.GetCompletionItemsAsync("#!", caret, spanToBeReplaced, cancellationToken);
+            }
         }
 
+
+        private PrettyPrompt.Completion.CompletionItem ConvertCompletionItem(CompletionsProduced completions, CompletionItem item, string text, TextSpan spanToBeReplaced)
+        {
+            var color = item.Kind switch
+            {
+                _ => AnsiColor.White,
+            };
+
+            string? displayText = item.DisplayText;
+            string? replacementText = item.InsertText ?? item.DisplayText;
+            string? filterText = item.FilterText ?? item.DisplayText;
+
+            if (completions.LinePositionSpan is not null && spanToBeReplaced.Start > completions.LinePositionSpan.Start.Character)
+            {
+                replacementText = replacementText.Substring((spanToBeReplaced.Start - completions.LinePositionSpan.Start.Character));
+            }
+            else if (completions.LinePositionSpan is null)
+            {
+                filterText = text.Substring(spanToBeReplaced.Start, spanToBeReplaced.Length) + filterText;
+            }
+
+            // Remove placeholder and truncate the suggestion there.
+            int indexPlaceholder = replacementText.IndexOf("$1");
+            if (indexPlaceholder >= 0)
+            {
+                replacementText = replacementText.Substring(0, indexPlaceholder);
+            }
+
+            var formattedDisplayText = new FormattedString(displayText, new FormatSpan(0, displayText.Length, color));
+            var formattedDescription = new FormattedString(item.Documentation);
+
+            return new PrettyPrompt.Completion.CompletionItem(
+                replacementText: replacementText,
+                displayText: formattedDisplayText,
+                filterText: filterText ?? displayText,
+                getExtendedDescription: _ => Task.FromResult(formattedDescription));
+        }
+
+        protected override async Task<bool> ShouldOpenCompletionWindowAsync(string text, int caret, KeyPress keyPress, CancellationToken cancellationToken)
+        {
+            if (text == "#!" && caret == 2)
+            {
+                if (keyPress.ConsoleKeyInfo.Key is ConsoleKey.D1 or ConsoleKey.Backspace)
+                {
+                    return true;
+                }
+            }
+            return await base.ShouldOpenCompletionWindowAsync(text, caret, keyPress, cancellationToken);
+        }
     }
 }

@@ -78,6 +78,7 @@ public static class KernelBuilder
             new KeyValueStoreKernel()
                 .UseWho());
 
+        /*
         var playwrightConnector = new PlaywrightKernelConnector();
 
         var (htmlKernel, jsKernel) = Task.Run(async () =>
@@ -89,6 +90,7 @@ public static class KernelBuilder
         
         compositeKernel.Add(jsKernel, new[] { "js" });
         compositeKernel.Add(htmlKernel);
+        */
         compositeKernel.Add(new MarkdownKernel());
         compositeKernel.Add(new SqlDiscoverabilityKernel());
         compositeKernel.Add(new KqlDiscoverabilityKernel());

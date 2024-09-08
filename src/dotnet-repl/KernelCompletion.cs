@@ -22,11 +22,12 @@ public class KernelCompletion
         _kernel = kernel;
     }
 
-    public async ValueTask<IReadOnlyList<CompletionItem>> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken cancellationToken)
+    public async Task<CompletionsProduced?> GetCompletionItemsAsync(string text, int caret, TextSpan spanToBeReplaced, CancellationToken cancellationToken)
     {
+        var linePosition = GetLineNumberForCharIndex(text, caret);
         var command = new RequestCompletions(
             text,
-            new LinePosition(0, caret));
+            linePosition);
 
         var result = await _kernel.SendAsync(command);
 
@@ -35,21 +36,29 @@ public class KernelCompletion
                                   .OfType<CompletionsProduced>()
                                   .FirstOrDefault();
 
-        if (completionsProduced is null)
-        {
-            return Array.Empty<CompletionItem>();
-        }
-
-        return completionsProduced.Completions.ToArray();
-
-
-        /*
-        var matches = FilterItems(text, spanToBeReplaced, completionsProduced);
-
-        return matches;
-        */
+        return completionsProduced;
     }
 
+    private LinePosition GetLineNumberForCharIndex(string text, int charPosition)
+    {
+        var lineEnumerator = MemoryExtensions.EnumerateLines(text.AsSpan());
+        int lineNum = 0;
+        while (lineEnumerator.MoveNext())
+        {
+            var currentLine = lineEnumerator.Current;
+            if (charPosition <= currentLine.Length)
+            {
+                return new(lineNum, charPosition);
+            }
+
+            charPosition -= currentLine.Length + 1; // add one back for newline.
+            lineNum++;
+        }
+
+        return new(lineNum, charPosition);
+    }
+
+    // totally unnecessary. we don't filter here
     private unsafe CompletionItem[] FilterItems(string text, TextSpan spanToBeReplaced, CompletionsProduced completionsProduced)
     {
         if (spanToBeReplaced.Length == 0)
