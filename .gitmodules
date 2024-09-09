@@ -1,0 +1,3 @@
+[submodule "PrettyPrompt"]
+	path = PrettyPrompt
+	url = git@github.com:vivlim/PrettyPrompt.git
