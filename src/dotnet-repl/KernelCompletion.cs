@@ -131,9 +131,11 @@ public class KernelCompletion
             }
             // todo sanitize cmdlet name
 
-            var getHelpOutput = await this.RunCodeAndCollectStdout($"Get-Help {cmdletName}", kernel, timeoutCts.Token);
+            //var getHelpOutput = await this.RunCodeAndCollectStdout($"Get-Help {cmdletName}", kernel, 10, timeoutCts.Token);
+            //var getHelpOutput = await this.RunCodeAndCollectStdout($"Get-Command {cmdletName}", kernel, 10, timeoutCts.Token);
+            //return new FormattedValue("text/plain", getHelpOutput);
 
-            return new FormattedValue("text/plain", getHelpOutput);
+            return new FormattedValue("text/plain", $"powershell cmdlet?: {cmdletName}");
         }
 
         var command = new RequestHoverText(text, linePosition, kernel);
@@ -147,7 +149,7 @@ public class KernelCompletion
         return hoverTextProduced?.Content.FirstOrDefault();
     }
 
-    public async Task<string> RunCodeAndCollectStdout(string cmdText, string? kernel, CancellationToken cancellationToken)
+    public async Task<string> RunCodeAndCollectStdout(string cmdText, string? kernel, int maxLines, CancellationToken cancellationToken)
     {
         var events = _kernel.KernelEvents.Replay();
         using var _ = events.Connect();
@@ -157,6 +159,8 @@ public class KernelCompletion
         var command = new SubmitCode(cmdText, kernel);
         var sendTask = _kernel.SendAsync(command);
 
+        int linesCollected = 0;
+
         await Task.Run(async () =>
         {
             using var _ = events.Subscribe(@event =>
@@ -164,26 +168,29 @@ public class KernelCompletion
                 switch (@event)
                 {
                     case StandardOutputValueProduced standardOutputValueProduced:
-                        stdOut.Append(standardOutputValueProduced.PlainTextValue());
+                        if (linesCollected < maxLines)
+                        {
+                            stdOut.Append(standardOutputValueProduced.PlainTextValue());
+                        }
 
+                        linesCollected++;
                         break;
 
                     // command completion events
 
                     case CommandFailed failed when failed.Command == command:
-                        tcs.SetResult();
+                        tcs.TrySetResult();
 
                         break;
 
                     case CommandSucceeded succeeded when succeeded.Command == command:
-                        tcs.SetResult();
+                        tcs.TrySetResult();
 
                         break;
                 }
             });
             await tcs.Task;
         });
-
         var result = await sendTask;
 
         return stdOut.ToString();
