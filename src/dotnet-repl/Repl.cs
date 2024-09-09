@@ -464,5 +464,43 @@ public class Repl : IDisposable
             return await base.ShouldOpenCompletionWindowAsync(text, caret, keyPress, cancellationToken);
         }
 
+        public override bool IsControlChar(KeyPress keyPress)
+        {
+            if (keyPress.ConsoleKeyInfo.KeyChar is ' ' or '(' or ')')
+            {
+                return true;
+            }
+
+            var baseRet = base.IsControlChar(keyPress);
+            return baseRet;
+        }
+
+        protected override bool IsWordCharacter(char c, string text, int caret)
+        {
+            if (text.Length > 0 && text[0] == '#')
+            {
+
+                int spaceIndex = text.IndexOf(' ');
+                if (spaceIndex == -1 || spaceIndex > caret)
+                if (c is '!' or '#')
+                {
+                    return true;
+                }
+            }
+
+            if (this.repl.DefaultKernelName is "powershell" or "pwsh")
+            {
+                if (c is '-')
+                {
+                    return true;
+                }
+            }
+                if (c is '-')
+                {
+                    return true;
+                }
+
+            return base.IsWordCharacter(c, text, caret);
+        }
     }
 }
